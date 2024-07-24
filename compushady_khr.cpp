@@ -43,19 +43,19 @@ extern "C"
             EShLanguage language = EShLanguage::EShLangCompute;
             if (shader_model && ::strlen(shader_model) >= 2)
             {
-                if (shader_model[0] == 'c' && shader_model[0] == 's')
+                if (shader_model[0] == 'c' && shader_model[1] == 's')
                 {
                     language = EShLanguage::EShLangCompute;
                 }
-                else if (shader_model[0] == 'v' && shader_model[0] == 's')
+                else if (shader_model[0] == 'v' && shader_model[1] == 's')
                 {
                     language = EShLanguage::EShLangVertex;
                 }
-                else if (shader_model[0] == 'p' && shader_model[0] == 's')
+                else if (shader_model[0] == 'p' && shader_model[1] == 's')
                 {
                     language = EShLanguage::EShLangFragment;
                 }
-                else if (shader_model[0] == 'm' && shader_model[0] == 's')
+                else if (shader_model[0] == 'm' && shader_model[1] == 's')
                 {
                     language = EShLanguage::EShLangMesh;
                 }
@@ -115,7 +115,7 @@ extern "C"
                 return nullptr;
             }
 
-            glslang::TIntermediate *intermediate = program.getIntermediate(EShLanguage::EShLangCompute);
+            glslang::TIntermediate *intermediate = program.getIntermediate(language);
 
             std::vector<uint32_t> spirv;
 
@@ -137,7 +137,7 @@ extern "C"
         return spv;
     }
 
-    COMPUSHADY_KHR_API const uint8_t *compushady_khr_spv_to_hlsl(const uint8_t *spirv, const size_t spirv_size, void *(*allocator)(const size_t), size_t *hlsl_size)
+    COMPUSHADY_KHR_API const uint8_t *compushady_khr_spv_to_hlsl(const uint8_t *spirv, const size_t spirv_size, const uint32_t flags, size_t *hlsl_size, char **error_ptr, size_t *error_len, void *(*allocator)(const size_t))
     {
         uint8_t *hlsl = nullptr;
         *hlsl_size = 0;
@@ -158,7 +158,11 @@ extern "C"
         }
         catch (const std::exception &e)
         {
-            printf("EXCEPTION: %s\n", e.what());
+            const char *exception_message = e.what();
+            *error_len = ::strlen(exception_message);
+            *error_ptr = reinterpret_cast<char *>(allocator(*error_len));
+            ::memcpy(*error_ptr, exception_message, *error_len);
+            return NULL;
         }
 
         if (hlsl_code.size() > 0)
@@ -214,7 +218,7 @@ extern "C"
         return msl;
     }
 
-    COMPUSHADY_KHR_API const uint8_t *compushady_khr_spv_disassemble(const uint8_t *spirv, const size_t spirv_size, void *(*allocator)(const size_t), size_t *assembly_size)
+    COMPUSHADY_KHR_API const uint8_t *compushady_khr_spv_disassemble(const uint8_t *spirv, const size_t spirv_size, size_t *assembly_size, void *(*allocator)(const size_t))
     {
         uint8_t *assembly = nullptr;
         *assembly_size = 0;
