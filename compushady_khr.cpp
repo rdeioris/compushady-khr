@@ -1,11 +1,10 @@
 #include <glslang/Public/ResourceLimits.h>
 #include <glslang/Public/ShaderLang.h>
 #include <SPIRV/GlslangToSpv.h>
-#include <SPIRV/disassemble.h>
+#include <spirv-tools/libspirv.h>
 #include <spirv_msl.hpp>
 #include <spirv_hlsl.hpp>
 #include <spirv_glsl.hpp>
-#include <sstream>
 
 #ifdef _WIN32
 #define COMPUSHADY_KHR_API __declspec(dllexport)
@@ -25,7 +24,7 @@ extern "C"
         free(ptr);
     }
 
-    COMPUSHADY_KHR_API const uint8_t *compushady_khr_glsl_to_spv(const char *glsl, const size_t glsl_size, const char *shader_model, const uint32_t flags, size_t *spv_size, char **error_ptr, size_t *error_len, void *(*allocator)(const size_t))
+    COMPUSHADY_KHR_API const uint8_t *compushady_khr_glsl_to_spv(const char *glsl, const size_t glsl_size, const char *shader_model, const char* entry_point, const uint32_t flags, size_t *spv_size, char **error_ptr, size_t *error_len, void *(*allocator)(const size_t))
     {
         uint8_t *spv = nullptr;
         *spv_size = 0;
@@ -68,7 +67,7 @@ extern "C"
             const int glsl_size_int = static_cast<int>(glsl_size);
 
             shader.setStringsWithLengths(&glsl, &glsl_size_int, 1);
-            shader.setEntryPoint("main");
+            shader.setEntryPoint(entry_point);
             shader.setEnvInput(glslang::EShSource::EShSourceGlsl, language, glslang::EShClient::EShClientVulkan, 100);
             shader.setEnvClient(glslang::EShClient::EShClientVulkan, glslang::EshTargetClientVersion::EShTargetVulkan_1_0);
             shader.setEnvTarget(glslang::EShTargetLanguage::EShTargetSpv, glslang::EShTargetLanguageVersion::EShTargetSpv_1_0);
@@ -124,6 +123,7 @@ extern "C"
             spv_options.disassemble = false;
             spv_options.validate = true;
             spv_options.generateDebugInfo = true;
+            spv_options.disableOptimizer = (flags & 2) != 0;
 
             glslang::GlslangToSpv(*intermediate, spirv, &logger, &spv_options);
 
@@ -137,11 +137,13 @@ extern "C"
         return spv;
     }
 
-    COMPUSHADY_KHR_API const uint8_t *compushady_khr_spv_to_hlsl(const uint8_t *spirv, const size_t spirv_size, const uint32_t flags, size_t *hlsl_size, char **error_ptr, size_t *error_len, void *(*allocator)(const size_t))
+    COMPUSHADY_KHR_API const uint8_t *compushady_khr_spv_to_hlsl(const uint8_t *spirv, const size_t spirv_size, const uint32_t flags, size_t *hlsl_size, char **entry_point_ptr, size_t *entry_point_len, char **error_ptr, size_t *error_len, void *(*allocator)(const size_t))
     {
         uint8_t *hlsl = nullptr;
         *hlsl_size = 0;
+        *entry_point_len = 0;
         std::string hlsl_code;
+        std::string entry_point;
 
         if (!allocator)
         {
@@ -155,6 +157,13 @@ extern "C"
             options.shader_model = 60;
             hlsl_compiler.set_hlsl_options(options);
             hlsl_code = hlsl_compiler.compile();
+            for(const spirv_cross::EntryPoint& entry_point_item  : hlsl_compiler.get_entry_points_and_stages())
+            {
+                if (entry_point_item.execution_model == hlsl_compiler.get_execution_model())
+                {
+                    entry_point = entry_point_item.name;
+                }
+            }
         }
         catch (const std::exception &e)
         {
@@ -167,6 +176,13 @@ extern "C"
 
         if (hlsl_code.size() > 0)
         {
+            
+            if (entry_point.size() > 0)
+            {
+                *entry_point_len = entry_point.size();
+                *entry_point_ptr = reinterpret_cast<char *>(allocator(*entry_point_len));
+                ::memcpy(*entry_point_ptr, entry_point.c_str(), *entry_point_len);
+            }
 
             *hlsl_size = hlsl_code.size();
 
@@ -178,7 +194,48 @@ extern "C"
         return hlsl;
     }
 
-    COMPUSHADY_KHR_API const uint8_t *compushady_khr_spv_to_msl(const uint8_t *spirv, const size_t spirv_size, void *(*allocator)(const size_t), size_t *msl_size, uint32_t *x, uint32_t *y, uint32_t *z)
+    COMPUSHADY_KHR_API const uint8_t *compushady_khr_spv_to_glsl(const uint8_t *spirv, const size_t spirv_size, const uint32_t flags, size_t *glsl_size, char **error_ptr, size_t *error_len, void *(*allocator)(const size_t))
+    {
+        uint8_t *glsl = nullptr;
+        *glsl_size = 0;
+        std::string glsl_code;
+
+        if (!allocator)
+        {
+            allocator = compushady_khr_malloc;
+        }
+
+        try
+        {
+            spirv_cross::CompilerGLSL glsl_compiler(reinterpret_cast<const uint32_t *>(spirv), spirv_size / sizeof(uint32_t));
+            spirv_cross::CompilerGLSL::Options options;
+
+            glsl_compiler.set_common_options(options);
+            glsl_code = glsl_compiler.compile();
+        }
+        catch (const std::exception &e)
+        {
+            const char *exception_message = e.what();
+            *error_len = ::strlen(exception_message);
+            *error_ptr = reinterpret_cast<char *>(allocator(*error_len));
+            ::memcpy(*error_ptr, exception_message, *error_len);
+            return NULL;
+        }
+
+        if (glsl_code.size() > 0)
+        {
+
+            *glsl_size = glsl_code.size();
+
+            glsl = reinterpret_cast<uint8_t *>(allocator(*glsl_size));
+
+            ::memcpy(glsl, glsl_code.c_str(), *glsl_size);
+        }
+
+        return glsl;
+    }
+
+    COMPUSHADY_KHR_API const uint8_t *compushady_khr_spv_to_msl(const uint8_t *spirv, const size_t spirv_size, const uint32_t flags, size_t *msl_size, uint32_t *x, uint32_t *y, uint32_t *z, char **error_ptr, size_t *error_len, void *(*allocator)(const size_t))
     {
         uint8_t *msl = nullptr;
         *msl_size = 0;
@@ -202,7 +259,11 @@ extern "C"
         }
         catch (const std::exception &e)
         {
-            printf("EXCEPTION: %s\n", e.what());
+            const char *exception_message = e.what();
+            *error_len = ::strlen(exception_message);
+            *error_ptr = reinterpret_cast<char *>(allocator(*error_len));
+            ::memcpy(*error_ptr, exception_message, *error_len);
+            return NULL;
         }
 
         if (msl_code.size() > 0)
@@ -218,7 +279,7 @@ extern "C"
         return msl;
     }
 
-    COMPUSHADY_KHR_API const uint8_t *compushady_khr_spv_disassemble(const uint8_t *spirv, const size_t spirv_size, size_t *assembly_size, void *(*allocator)(const size_t))
+    COMPUSHADY_KHR_API const uint8_t *compushady_khr_spv_disassemble(const uint8_t *spirv, const size_t spirv_size, const uint32_t flags, size_t *assembly_size, char **error_ptr, size_t *error_len, void *(*allocator)(const size_t))
     {
         uint8_t *assembly = nullptr;
         *assembly_size = 0;
@@ -229,22 +290,35 @@ extern "C"
         }
 
         const uint32_t *spirv_ptr = reinterpret_cast<const uint32_t *>(spirv);
-        std::vector<uint32_t> spirv_vector(spirv_ptr, spirv_ptr + (spirv_size / sizeof(uint32_t)));
 
-        std::ostringstream assembly_stream;
+        spv_context context = spvContextCreate(SPV_ENV_UNIVERSAL_1_5);
 
-        spv::Disassemble(assembly_stream, spirv_vector);
+        uint32_t options = SPV_BINARY_TO_TEXT_OPTION_FRIENDLY_NAMES;
 
-        const std::string assembly_string = assembly_stream.str();
-        if (assembly_string.size() > 0)
+        spv_text text = nullptr;
+        spv_diagnostic diagnostic = nullptr;
+
+        spv_result_t error = spvBinaryToText(context, spirv_ptr, spirv_size / 4, options,
+                                             &text, &diagnostic);
+        spvContextDestroy(context);
+
+        if (error)
         {
-
-            *assembly_size = assembly_string.size();
-
-            assembly = reinterpret_cast<uint8_t *>(allocator(*assembly_size));
-
-            ::memcpy(assembly, assembly_string.c_str(), *assembly_size);
+            const char *exception_message = diagnostic->error;
+            *error_len = ::strlen(exception_message);
+            *error_ptr = reinterpret_cast<char *>(allocator(*error_len));
+            ::memcpy(*error_ptr, exception_message, *error_len);
+            spvDiagnosticDestroy(diagnostic);
+            return NULL;
         }
+
+        *assembly_size = text->length;
+
+        assembly = reinterpret_cast<uint8_t *>(allocator(*assembly_size));
+
+        ::memcpy(assembly, text->str, *assembly_size);
+
+        spvTextDestroy(text);
 
         return assembly;
     }
