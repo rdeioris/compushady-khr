@@ -155,6 +155,7 @@ extern "C"
             spirv_cross::CompilerHLSL hlsl_compiler(reinterpret_cast<const uint32_t *>(spirv), spirv_size / sizeof(uint32_t));
             spirv_cross::CompilerHLSL::Options options;
             options.shader_model = 60;
+            hlsl_compiler.set_resource_binding_flags(spirv_cross::HLSL_BINDING_AUTO_ALL);
             hlsl_compiler.set_hlsl_options(options);
             hlsl_code = hlsl_compiler.compile();
             for(const spirv_cross::EntryPoint& entry_point_item  : hlsl_compiler.get_entry_points_and_stages())
