@@ -2,6 +2,12 @@ cmake_minimum_required(VERSION 3.17.2)
 
 project(compushady-khr)
 
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_CXX_STANDARD 17)
+
+set(SPIRV_SKIP_EXECUTABLES ON)
+set(ENABLE_GLSLANG_BINARIES OFF)
+
 add_subdirectory(SPIRV-Headers)
 add_subdirectory(SPIRV-Tools)
 add_subdirectory(glslang)
